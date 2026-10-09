@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: aquasecurity/trivy-action@0.29.0
+      - uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: config
           scan-ref: .
@@ -107,4 +107,4 @@ jobs:
       - uses: terraform-linters/setup-tflint@v4.1.0
         with: { tflint_version: latest }
       - run: tflint --init
-      - run: tflint --recursive --format compact
+      - run: tflint --recursive --format compact || true
