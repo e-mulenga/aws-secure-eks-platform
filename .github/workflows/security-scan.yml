@@ -71,14 +71,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: config
-          scan-ref: .
-          format: sarif
-          output: trivy.sarif
-          severity: "HIGH,CRITICAL"
-          exit-code: "0"
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      - name: Run Trivy
+        run: |
+          trivy config . --format sarif --output trivy.sarif --severity HIGH,CRITICAL || true
       - name: Ensure valid SARIF exists
         if: always()
         run: |

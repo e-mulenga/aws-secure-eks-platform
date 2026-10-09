@@ -101,11 +101,18 @@ jobs:
     strategy:
       matrix:
         environment: [dev, test, prod]
+        include:
+          - environment: dev
+            ENV_UPPER: DEV
+          - environment: test
+            ENV_UPPER: TEST
+          - environment: prod
+            ENV_UPPER: PROD
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', matrix.ENV_UPPER)] }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: DriftDetection-EKS-${{ matrix.environment }}-${{ github.run_id }}
           mask-aws-account-id: true
