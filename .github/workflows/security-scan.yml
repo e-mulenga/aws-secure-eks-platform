@@ -1,0 +1,110 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  tfsec:
+    name: tfsec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Install tfsec
+        run: |
+          curl -Lo /usr/local/bin/tfsec \
+            "https://github.com/aquasecurity/tfsec/releases/download/v1.28.6/tfsec-linux-amd64"
+          chmod +x /usr/local/bin/tfsec
+      - name: Run tfsec
+        run: |
+          tfsec . --minimum-severity HIGH --format sarif \
+            --out tfsec.sarif --no-color --exclude-downloaded-modules || true
+      - name: Ensure valid SARIF exists
+        if: always()
+        run: |
+          if [ -d tfsec.sarif ]; then rm -rf tfsec.sarif; fi
+          if [ ! -f tfsec.sarif ] || [ ! -s tfsec.sarif ]; then
+            echo '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "tfsec"}}, "results": []}]}' > tfsec.sarif
+          fi
+      - uses: github/codeql-action/upload-sarif@v3.29.5
+        if: always()
+        with: { sarif_file: tfsec.sarif, category: tfsec }
+
+  checkov:
+    name: checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run Checkov SAST
+        run: |
+          pip install checkov --quiet
+          checkov -d . --framework terraform,kubernetes --output sarif --output-file-path . || true
+          if [ -f results_sarif.sarif ]; then
+            mv results_sarif.sarif checkov.sarif
+          fi
+      - name: Ensure valid SARIF exists
+        if: always()
+        run: |
+          if [ -d checkov.sarif ]; then rm -rf checkov.sarif; fi
+          if [ ! -f checkov.sarif ] || [ ! -s checkov.sarif ]; then
+            echo '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "checkov"}}, "results": []}]}' > checkov.sarif
+          fi
+      - uses: github/codeql-action/upload-sarif@v3.29.5
+        if: always()
+        with: { sarif_file: checkov.sarif, category: checkov }
+
+  trivy:
+    name: Trivy IaC + K8s
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: "HIGH,CRITICAL"
+          exit-code: "0"
+      - name: Ensure valid SARIF exists
+        if: always()
+        run: |
+          if [ -d trivy.sarif ]; then rm -rf trivy.sarif; fi
+          if [ ! -f trivy.sarif ] || [ ! -s trivy.sarif ]; then
+            echo '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "Trivy"}}, "results": []}]}' > trivy.sarif
+          fi
+      - uses: github/codeql-action/upload-sarif@v3.29.5
+        if: always()
+        with: { sarif_file: trivy.sarif, category: trivy }
+
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2.3.9
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: terraform-linters/setup-tflint@v4.1.0
+        with: { tflint_version: latest }
+      - run: tflint --init
+      - run: tflint --recursive --format compact

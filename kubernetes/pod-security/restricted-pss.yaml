@@ -1,0 +1,54 @@
+# ============================================================
+# Pod Security Standards — Restricted Profile Reference
+# These constraints are enforced by the built-in Kubernetes
+# Pod Security Admission controller via namespace labels.
+# This file documents the security requirements for workloads.
+# ============================================================
+# Workloads in "restricted" namespaces MUST:
+#   ✅ Set runAsNonRoot: true
+#   ✅ Set runAsUser: >= 1000
+#   ✅ Set readOnlyRootFilesystem: true
+#   ✅ Drop ALL capabilities
+#   ✅ Disallow privilege escalation (allowPrivilegeEscalation: false)
+#   ✅ Set seccompProfile: RuntimeDefault or Localhost
+#   ✅ NOT use hostPID, hostIPC, hostNetwork
+#   ✅ NOT mount hostPath volumes
+#
+# Example compliant pod spec:
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: compliant-pod-example
+  namespace: app
+  annotations:
+    seccomp.security.alpha.kubernetes.io/pod: runtime/default
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: <ECR_REPO>/app:latest
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

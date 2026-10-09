@@ -1,0 +1,25 @@
+organization_name  = "acme-enterprise"
+environment        = "test"
+aws_region         = "af-south-1"
+owner              = "Platform Engineering"
+cost_center        = "PLAT001"
+kms_key_arn        = ""
+vpc_id             = ""
+private_subnet_ids = []
+public_subnet_ids  = []
+cluster_name       = "platform"
+kubernetes_version = "1.29"
+cluster_endpoint_private_access = true
+cluster_endpoint_public_access  = false
+node_groups = {
+  general = {
+    instance_types = ["t3.large"]
+    capacity_type  = "ON_DEMAND"
+    desired_size   = 2; min_size = 2; max_size = 8
+    disk_size_gb   = 50
+    labels         = { role = "general" }
+    taints         = []
+  }
+}
+enable_falco       = true
+log_retention_days = 60

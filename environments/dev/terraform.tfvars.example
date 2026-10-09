@@ -1,0 +1,27 @@
+organization_name  = "acme-enterprise"
+environment        = "dev"
+aws_region         = "af-south-1"
+owner              = "Platform Engineering"
+cost_center        = "PLAT001"
+kms_key_arn        = ""
+vpc_id             = ""
+private_subnet_ids = []
+public_subnet_ids  = []
+cluster_name       = "platform"
+kubernetes_version = "1.36"
+cluster_endpoint_private_access = true
+cluster_endpoint_public_access  = true    # Allow public in dev for convenience
+cluster_endpoint_public_access_cidrs = [] # Restrict to office/VPN IPs
+node_groups = {
+  general = {
+    instance_types = ["t3.medium"]
+    capacity_type  = "ON_DEMAND"
+    desired_size   = 2; min_size = 1; max_size = 5
+    disk_size_gb   = 20
+    labels         = { role = "general" }
+    taints         = []
+  }
+}
+enable_falco       = false   # Disabled in dev to reduce cost
+enable_karpenter   = false
+log_retention_days = 30

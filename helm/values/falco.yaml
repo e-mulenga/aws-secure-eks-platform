@@ -1,0 +1,37 @@
+# Helm values for Falco runtime security
+driver:
+  kind: ebpf
+
+falco:
+  grpc:
+    enabled: true
+  grpcOutput:
+    enabled: true
+  json_output: true
+  log_stderr: true
+  priority: warning
+
+  # Custom rules for EKS environment
+  rules_file:
+    - /etc/falco/falco_rules.yaml
+    - /etc/falco/falco_rules.local.yaml
+
+falcosidekick:
+  enabled: true
+  replicaCount: 2
+  config:
+    aws:
+      region: ""     # Injected by Terraform
+      sns:
+        topicarn: "" # Injected by Terraform (SOC alerts topic)
+    slack:
+      webhookurl: "" # Optional: Secrets Manager reference
+    debug: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

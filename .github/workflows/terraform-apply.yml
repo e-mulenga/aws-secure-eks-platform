@@ -1,0 +1,126 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths: ["**.tf", "helm/**", "kubernetes/**"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, test, prod]
+  schedule:
+    - cron: "0 6 * * 1-5"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_VERSION: "1.7.5"
+  AWS_REGION: "af-south-1"
+
+jobs:
+  deploy-dev:
+    name: Deploy → DEV
+    runs-on: ubuntu-latest
+    environment: dev
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-EKS-Apply-Dev-${{ github.run_id }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+      - uses: hashicorp/setup-terraform@v3.1.2
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - run: terraform init -backend-config="environments/dev/backend.tf" -input=false -reconfigure
+      - run: terraform plan -var-file="environments/dev/terraform.tfvars" -out=dev.tfplan -input=false
+      - run: terraform apply -auto-approve -input=false dev.tfplan
+
+  deploy-test:
+    name: Deploy → TEST
+    runs-on: ubuntu-latest
+    environment: test
+    needs: deploy-dev
+    if: |
+      (github.event_name == 'push' && needs.deploy-dev.result == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'test')
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN_TEST }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-EKS-Apply-Test-${{ github.run_id }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+      - uses: hashicorp/setup-terraform@v3.1.2
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - run: terraform init -backend-config="environments/test/backend.tf" -input=false -reconfigure
+      - run: terraform plan -var-file="environments/test/terraform.tfvars" -out=test.tfplan -input=false
+      - run: terraform apply -auto-approve -input=false test.tfplan
+
+  deploy-prod:
+    name: Deploy → PROD
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-EKS-Apply-Prod-${{ github.run_id }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+      - uses: hashicorp/setup-terraform@v3.1.2
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - run: terraform init -backend-config="environments/prod/backend.tf" -input=false -reconfigure
+      - name: Plan
+        id: plan
+        run: |
+          terraform plan -var-file="environments/prod/terraform.tfvars" -detailed-exitcode -input=false || exitcode=$?
+          echo "exitcode=${exitcode:-0}" >> $GITHUB_OUTPUT
+      - name: Apply
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          terraform plan -var-file="environments/prod/terraform.tfvars" -out=prod.tfplan -input=false
+          terraform apply -auto-approve -input=false prod.tfplan
+
+  drift-detection:
+    name: Drift Detection — ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    strategy:
+      matrix:
+        environment: [dev, test, prod]
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: DriftDetection-EKS-${{ matrix.environment }}-${{ github.run_id }}
+          mask-aws-account-id: true
+      - uses: hashicorp/setup-terraform@v3.1.2
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - run: terraform init -backend-config="environments/${{ matrix.environment }}/backend.tf" -input=false -reconfigure
+      - name: Detect Drift
+        id: drift
+        run: |
+          terraform plan -var-file="environments/${{ matrix.environment }}/terraform.tfvars" \
+            -detailed-exitcode -input=false -no-color 2>&1 | tee drift.txt
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+      - name: Alert on drift
+        if: steps.drift.outputs.exitcode == '2'
+        run: |
+          echo "## ⚠️ DRIFT DETECTED in ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          cat drift.txt >> $GITHUB_STEP_SUMMARY
+          exit 1
