@@ -101,13 +101,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, test, prod]
+        include:
+          - environment: dev
+            env_upper: DEV
+          - environment: test
+            env_upper: TEST
+          - environment: prod
+            env_upper: PROD
     steps:
       - uses: actions/checkout@v4.2.2
 
       - uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', matrix.env_upper)] }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-EKS-Plan-${{ matrix.environment }}-${{ github.run_id }}
           role-duration-seconds: 1800
