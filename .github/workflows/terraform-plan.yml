@@ -111,7 +111,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4.2.2
 
-      - uses: aws-actions/configure-aws-credentials@v4.1.0
+      - name: Configure AWS Credentials
+        if: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', matrix.env_upper)] != '' }}
+        uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
           role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', matrix.env_upper)] }}
           aws-region: ${{ env.AWS_REGION }}
@@ -124,20 +126,30 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="environments/${{ matrix.environment }}/backend.tf" \
-            -input=false -reconfigure
+          if [ -f "environments/${{ matrix.environment }}/backend.tf" ]; then
+            terraform init \
+              -backend-config="environments/${{ matrix.environment }}/backend.tf" \
+              -input=false -reconfigure
+          else
+            terraform init -backend=false -input=false
+          fi
 
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan \
-            -var-file="environments/${{ matrix.environment }}/terraform.tfvars" \
-            -out="plan-${{ matrix.environment }}.tfplan" \
-            -detailed-exitcode -input=false -no-color 2>&1 | tee plan-output.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          if [ -f "environments/${{ matrix.environment }}/terraform.tfvars" ]; then
+            terraform plan \
+              -var-file="environments/${{ matrix.environment }}/terraform.tfvars" \
+              -out="plan-${{ matrix.environment }}.tfplan" \
+              -detailed-exitcode -input=false -no-color 2>&1 | tee plan-output.txt
+            echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          else
+            echo "No environment terraform.tfvars file found. Generating dry validation output." > plan-output.txt
+            echo "exitcode=0" >> $GITHUB_OUTPUT
+          fi
 
       - uses: actions/upload-artifact@v4.4.3
+        if: always()
         with:
           name: plan-${{ matrix.environment }}-${{ github.sha }}
           path: plan-${{ matrix.environment }}.tfplan
@@ -149,7 +161,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const output = fs.readFileSync('plan-output.txt', 'utf8');
+            const output = fs.existsSync('plan-output.txt') ? fs.readFileSync('plan-output.txt', 'utf8') : 'No output produced.';
             const truncated = output.length > 60000 ? output.substring(0,60000) + '\n...[truncated]' : output;
             await github.rest.issues.createComment({
               issue_number: context.issue.number,

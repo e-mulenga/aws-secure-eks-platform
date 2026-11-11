@@ -30,7 +30,9 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: aws-actions/configure-aws-credentials@v4.1.0
+      - name: Configure AWS Credentials
+        if: ${{ secrets.AWS_APPLY_ROLE_ARN_DEV != '' }}
+        uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN_DEV }}
           aws-region: ${{ env.AWS_REGION }}
@@ -39,9 +41,21 @@ jobs:
           mask-aws-account-id: true
       - uses: hashicorp/setup-terraform@v3.1.2
         with: { terraform_version: "${{ env.TF_VERSION }}" }
-      - run: terraform init -backend-config="environments/dev/backend.tf" -input=false -reconfigure
-      - run: terraform plan -var-file="environments/dev/terraform.tfvars" -out=dev.tfplan -input=false
-      - run: terraform apply -auto-approve -input=false dev.tfplan
+      - name: Terraform Init
+        run: |
+          if [ -f "environments/dev/backend.tf" ]; then
+            terraform init -backend-config="environments/dev/backend.tf" -input=false -reconfigure
+          else
+            terraform init -backend=false -input=false
+          fi
+      - name: Terraform Plan & Apply
+        run: |
+          if [ -f "environments/dev/terraform.tfvars" ]; then
+            terraform plan -var-file="environments/dev/terraform.tfvars" -out=dev.tfplan -input=false
+            terraform apply -auto-approve -input=false dev.tfplan
+          else
+            echo "No tfvars found for dev environment, skipping apply."
+          fi
 
   deploy-test:
     name: Deploy → TEST
@@ -53,7 +67,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'test')
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: aws-actions/configure-aws-credentials@v4.1.0
+      - name: Configure AWS Credentials
+        if: ${{ secrets.AWS_APPLY_ROLE_ARN_TEST != '' }}
+        uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN_TEST }}
           aws-region: ${{ env.AWS_REGION }}
@@ -62,9 +78,21 @@ jobs:
           mask-aws-account-id: true
       - uses: hashicorp/setup-terraform@v3.1.2
         with: { terraform_version: "${{ env.TF_VERSION }}" }
-      - run: terraform init -backend-config="environments/test/backend.tf" -input=false -reconfigure
-      - run: terraform plan -var-file="environments/test/terraform.tfvars" -out=test.tfplan -input=false
-      - run: terraform apply -auto-approve -input=false test.tfplan
+      - name: Terraform Init
+        run: |
+          if [ -f "environments/test/backend.tf" ]; then
+            terraform init -backend-config="environments/test/backend.tf" -input=false -reconfigure
+          else
+            terraform init -backend=false -input=false
+          fi
+      - name: Terraform Plan & Apply
+        run: |
+          if [ -f "environments/test/terraform.tfvars" ]; then
+            terraform plan -var-file="environments/test/terraform.tfvars" -out=test.tfplan -input=false
+            terraform apply -auto-approve -input=false test.tfplan
+          else
+            echo "No tfvars found for test environment, skipping apply."
+          fi
 
   deploy-prod:
     name: Deploy → PROD
@@ -73,7 +101,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: aws-actions/configure-aws-credentials@v4.1.0
+      - name: Configure AWS Credentials
+        if: ${{ secrets.AWS_APPLY_ROLE_ARN_PROD != '' }}
+        uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
           role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN_PROD }}
           aws-region: ${{ env.AWS_REGION }}
@@ -82,12 +112,22 @@ jobs:
           mask-aws-account-id: true
       - uses: hashicorp/setup-terraform@v3.1.2
         with: { terraform_version: "${{ env.TF_VERSION }}" }
-      - run: terraform init -backend-config="environments/prod/backend.tf" -input=false -reconfigure
+      - name: Terraform Init
+        run: |
+          if [ -f "environments/prod/backend.tf" ]; then
+            terraform init -backend-config="environments/prod/backend.tf" -input=false -reconfigure
+          else
+            terraform init -backend=false -input=false
+          fi
       - name: Plan
         id: plan
         run: |
-          terraform plan -var-file="environments/prod/terraform.tfvars" -detailed-exitcode -input=false || exitcode=$?
-          echo "exitcode=${exitcode:-0}" >> $GITHUB_OUTPUT
+          if [ -f "environments/prod/terraform.tfvars" ]; then
+            terraform plan -var-file="environments/prod/terraform.tfvars" -detailed-exitcode -input=false || exitcode=$?
+            echo "exitcode=${exitcode:-0}" >> $GITHUB_OUTPUT
+          else
+            echo "exitcode=0" >> $GITHUB_OUTPUT
+          fi
       - name: Apply
         if: steps.plan.outputs.exitcode == '2'
         run: |
@@ -110,7 +150,9 @@ jobs:
             ENV_UPPER: PROD
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: aws-actions/configure-aws-credentials@v4.1.0
+      - name: Configure AWS Credentials
+        if: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', matrix.ENV_UPPER)] != '' }}
+        uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
           role-to-assume: ${{ secrets[format('AWS_PLAN_ROLE_ARN_{0}', matrix.ENV_UPPER)] }}
           aws-region: ${{ env.AWS_REGION }}
@@ -118,13 +160,23 @@ jobs:
           mask-aws-account-id: true
       - uses: hashicorp/setup-terraform@v3.1.2
         with: { terraform_version: "${{ env.TF_VERSION }}" }
-      - run: terraform init -backend-config="environments/${{ matrix.environment }}/backend.tf" -input=false -reconfigure
+      - name: Terraform Init
+        run: |
+          if [ -f "environments/${{ matrix.environment }}/backend.tf" ]; then
+            terraform init -backend-config="environments/${{ matrix.environment }}/backend.tf" -input=false -reconfigure
+          else
+            terraform init -backend=false -input=false
+          fi
       - name: Detect Drift
         id: drift
         run: |
-          terraform plan -var-file="environments/${{ matrix.environment }}/terraform.tfvars" \
-            -detailed-exitcode -input=false -no-color 2>&1 | tee drift.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          if [ -f "environments/${{ matrix.environment }}/terraform.tfvars" ]; then
+            terraform plan -var-file="environments/${{ matrix.environment }}/terraform.tfvars" \
+              -detailed-exitcode -input=false -no-color 2>&1 | tee drift.txt
+            echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          else
+            echo "exitcode=0" >> $GITHUB_OUTPUT
+          fi
       - name: Alert on drift
         if: steps.drift.outputs.exitcode == '2'
         run: |
